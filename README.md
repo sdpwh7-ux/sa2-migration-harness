@@ -29,3 +29,7 @@ pytest -v
 - `get_user_with_orders` returns `UserRead | None`. The query uses `selectinload(User.orders)` before `UserRead.model_validate`.
 - Tests open a file-backed `sqlite+aiosqlite` engine with `AsyncAdaptedQueuePool`. Each session test joins an outer connection transaction, uses `AsyncSession(..., join_transaction_mode="create_savepoint", expire_on_commit=False)`, closes the session, and rolls back the outer transaction. After that connection closes, the pool is a `QueuePool` and `checkedout()` is `0`.
 - Python 3.11 `sqlite3` still uses legacy transaction control: `SAVEPOINT` does not imply `BEGIN`, so a released savepoint can remain after `ROLLBACK`. The test engine disables the driver's `BEGIN` and emits `BEGIN` from SQLAlchemy. An inner `session.commit()` is therefore undone by the outer rollback.
+
+## Supplied async-generator exercise
+
+`stream_pending_ids` is a supplied technical exercise reproduction, not a production incident. The session is closed only after the `for` loop. Early `aclose()` throws `GeneratorExit` at the `yield`, skips that `close()`, and leaves the pooled connection checked out.
