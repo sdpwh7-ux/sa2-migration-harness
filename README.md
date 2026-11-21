@@ -32,4 +32,18 @@ pytest -v
 
 ## Supplied async-generator exercise
 
-`stream_pending_ids` is a supplied technical exercise reproduction, not a production incident. The session is closed only after the `for` loop. Early `aclose()` throws `GeneratorExit` at the `yield`, skips that `close()`, and leaves the pooled connection checked out.
+`stream_pending_ids` is a supplied technical exercise. The first form, kept in the reproduction commit, closed the `AsyncSession` only after a normal loop. That was not a production incident. `aclose()` throws `GeneratorExit` at `yield` and skipped `close()`, so the pooled connection stayed checked out (`checkedout() == 1` after `aclosing` and `break`).
+
+Cleanup now runs in `finally`. If cancellation hits `session.close()`, that cancellation is cleared only long enough to run `close()` again. `CancelledError` is raised after a `close()` attempt finishes. `await asyncio.shield(session.close())` alone does not give that order: a cancel during the shield raises `CancelledError` in the caller while the shielded close is still running.
+
+On Python 3.11 a bare `async for` / `break` does not close the generator, so it does not run that `finally`. Callers use `contextlib.aclosing` unless they take ownership another way that calls `aclose()`:
+
+```python
+from contextlib import aclosing
+
+async with aclosing(stream_pending_ids(session_factory)) as pending_ids:
+    async for pending_id in pending_ids:
+        ...
+```
+
+The leak tests check `pool.checkedout() == 0` after `aclosing` plus `break`, after task cancellation, and after cancellation delivered during `close()`, before engine disposal. They do not wait on the garbage collector. They do not show that a bare `async for` / `break` returns the connection.
